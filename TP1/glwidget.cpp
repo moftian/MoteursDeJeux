@@ -131,7 +131,7 @@ void GLWidget::cleanup()
     if (m_program == nullptr)
         return;
     makeCurrent();
-    m_logoVbo.destroy();
+    m_vbo.destroy();
     delete m_program;
     m_program = 0;
     doneCurrent();
@@ -146,10 +146,13 @@ static const char *vertexShaderSourceCore =
     "uniform mat4 projMatrix;\n"
     "uniform mat4 mvMatrix;\n"
     "uniform mat3 normalMatrix;\n"
+    "in vec2 a_texcoord;\n"
+    "out vec2 v_texcoord;\n"
     "void main() {\n"
     "   vert = vertex.xyz;\n"
     "   vertNormal = normalMatrix * normal;\n"
     "   gl_Position = projMatrix * mvMatrix * vertex;\n"
+    "   v_texcoord = a_texcoord;"
     "}\n";
 
 static const char *fragmentShaderSourceCore =
@@ -158,12 +161,15 @@ static const char *fragmentShaderSourceCore =
     "in highp vec3 vertNormal;\n"
     "out highp vec4 fragColor;\n"
     "uniform highp vec3 lightPos;\n"
+    "uniform sampler2D texture;"
+    "in vec2 v_texcoord;"
     "void main() {\n"
     "   highp vec3 L = normalize(lightPos - vert);\n"
     "   highp float NL = max(dot(normalize(vertNormal), L), 0.0);\n"
     "   highp vec3 color = vec3(0.39, 1.0, 0.0);\n"
     "   highp vec3 col = clamp(color * 0.2 + color * 0.8 * NL, 0.0, 1.0);\n"
-    "   fragColor = vec4(col, 1.0);\n"
+    "   //fragColor = vec4(col, 1.0);\n"
+    "   fragColor = texture2D(texture, v_texcoord);\n"
     "}\n";
 
 static const char *vertexShaderSource =
@@ -174,22 +180,28 @@ static const char *vertexShaderSource =
     "uniform mat4 projMatrix;\n"
     "uniform mat4 mvMatrix;\n"
     "uniform mat3 normalMatrix;\n"
+    "attribute vec2 a_texcoord;\n"
+    "varying vec2 v_texcoord;\n"
     "void main() {\n"
     "   vert = vertex.xyz;\n"
     "   vertNormal = normalMatrix * normal;\n"
     "   gl_Position = projMatrix * mvMatrix * vertex;\n"
+    "   v_texcoord = a_texcoord;"
     "}\n";
 
 static const char *fragmentShaderSource =
     "varying highp vec3 vert;\n"
     "varying highp vec3 vertNormal;\n"
     "uniform highp vec3 lightPos;\n"
+    "uniform sampler2D texture;"
+    "varying vec2 v_texcoord;"
     "void main() {\n"
     "   highp vec3 L = normalize(lightPos - vert);\n"
     "   highp float NL = max(dot(normalize(vertNormal), L), 0.0);\n"
     "   highp vec3 color = vec3(0.39, 1.0, 0.0);\n"
     "   highp vec3 col = clamp(color * 0.2 + color * 0.8 * NL, 0.0, 1.0);\n"
-    "   gl_FragColor = vec4(col, 1.0);\n"
+    "   //gl_FragColor = vec4(col, 1.0);\n"
+    "   fragColor = texture2D(texture, v_texcoord);\n"
     "}\n";
 
 void GLWidget::initializeGL()
@@ -207,6 +219,7 @@ void GLWidget::initializeGL()
     glClearColor(0, 0, 0, m_transparent ? 0 : 1);
 
     m_program = new QOpenGLShaderProgram;
+    // fonction qui contient glCreateShader, glShaderSource, glCompileShader, glCreateProgram, glAttachShader
     m_program->addShaderFromSourceCode(QOpenGLShader::Vertex, m_core ? vertexShaderSourceCore : vertexShaderSource);
     m_program->addShaderFromSourceCode(QOpenGLShader::Fragment, m_core ? fragmentShaderSourceCore : fragmentShaderSource);
     m_program->bindAttributeLocation("vertex", 0);
@@ -214,7 +227,7 @@ void GLWidget::initializeGL()
     m_program->link();
 
     m_program->bind();
-    m_projMatrixLoc = m_program->uniformLocation("projMatrix");
+    m_projMatrixLoc = m_program->uniformLocation("projMatrix");  // egale a glGetUniformLocation()
     m_mvMatrixLoc = m_program->uniformLocation("mvMatrix");
     m_normalMatrixLoc = m_program->uniformLocation("normalMatrix");
     m_lightPosLoc = m_program->uniformLocation("lightPos");
@@ -227,32 +240,49 @@ void GLWidget::initializeGL()
     QOpenGLVertexArrayObject::Binder vaoBinder(&m_vao);
 
     // Setup our vertex buffer object.
-    m_logoVbo.create();
-    m_logoVbo.bind();
-    m_logoVbo.allocate(m_logo.constData(), m_logo.count() * sizeof(GLfloat));
+    m_vbo.create();
+    m_vbo.bind();
+
+    //m_logoVbo.allocate(m_logo.constData(), m_logo.count() * sizeof(GLfloat));
+    m_vbo.allocate(m_plane.constData(), m_plane.count() * sizeof(GLfloat));
 
     // Store the vertex attribute bindings for the program.
     setupVertexAttribs();
 
     // Our camera never changes in this example.
     m_camera.setToIdentity();
-    m_camera.translate(0, 0, -1);
+    m_camera.translate(0, 0, -2);  // position de camera par raport au point d'observation
 
     // Light position is fixed.
     m_program->setUniformValue(m_lightPosLoc, QVector3D(0, 0, 70));
 
     m_program->release();
+    //textures
+    GLuint texture;
+    glGenTextures(1, &texture);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D,texture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    QImage tex_image(":/Assets/terrain.jpg");
+    tex_image.mirrored();
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, tex_image.width(), tex_image.height(), 0, GL_RGB, GL_UNSIGNED_BYTE,
+                 tex_image.convertToFormat(QImage::Format_RGB888).bits());
+    glGenerateMipmap(GL_TEXTURE_2D);
 }
 
 void GLWidget::setupVertexAttribs()
 {
-    m_logoVbo.bind();
+    m_vbo.bind();
     QOpenGLFunctions *f = QOpenGLContext::currentContext()->functions();
     f->glEnableVertexAttribArray(0);
     f->glEnableVertexAttribArray(1);
-    f->glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GLfloat), 0);
-    f->glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GLfloat), reinterpret_cast<void *>(3 * sizeof(GLfloat)));
-    m_logoVbo.release();
+    f->glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), 0);  // vertex
+    f->glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), reinterpret_cast<void *>(3 * sizeof(GLfloat)));  // normal
+    f->glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), reinterpret_cast<void *>(6 * sizeof(GLfloat))); // tex
+    m_vbo.release();
 }
 
 void GLWidget::paintGL()
@@ -268,12 +298,14 @@ void GLWidget::paintGL()
 
     QOpenGLVertexArrayObject::Binder vaoBinder(&m_vao);
     m_program->bind();
+
+    glBindTexture(GL_TEXTURE_2D, 0);
     m_program->setUniformValue(m_projMatrixLoc, m_proj);
     m_program->setUniformValue(m_mvMatrixLoc, m_camera * m_world);
     QMatrix3x3 normalMatrix = m_world.normalMatrix();
     m_program->setUniformValue(m_normalMatrixLoc, normalMatrix);
 
-    glDrawArrays(GL_TRIANGLES, 0, m_logo.vertexCount());
+    glDrawArrays(GL_TRIANGLES, 0, m_plane.vertexCount());
 
     m_program->release();
 }
@@ -302,4 +334,12 @@ void GLWidget::mouseMoveEvent(QMouseEvent *event)
         setZRotation(m_zRot + 8 * dx);
     }
     m_lastPos = event->pos();
+}
+
+void GLWidget::wheelEvent(QWheelEvent *event)
+{
+    QPoint num_degrees = event->angleDelta() / 8;
+    m_camera.translate(0, 0, num_degrees.y() >= 0 ? 1 : -1);
+    event->accept();
+    repaint();
 }
